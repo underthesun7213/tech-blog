@@ -1,0 +1,60 @@
+---
+import { render } from 'astro:content';
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import { formatDate, useTranslations, type Lang } from '@/i18n/ui';
+import { getPosts, parsePostId, postUrl, type Post } from '@/lib/posts';
+
+export async function getStaticPaths() {
+  const posts = await getPosts();
+  // slug -> languages it exists in, so each page can link to its translations
+  const bySlug = new Map<string, Partial<Record<Lang, string>>>();
+  for (const post of posts) {
+    const { lang, slug } = parsePostId(post.id);
+    bySlug.set(slug, { ...bySlug.get(slug), [lang]: postUrl(lang, slug) });
+  }
+  return posts.map((post) => {
+    const { lang, slug } = parsePostId(post.id);
+    return { params: { lang, slug }, props: { post, alternates: bySlug.get(slug)! } };
+  });
+}
+
+interface Props {
+  post: Post;
+  alternates: Partial<Record<Lang, string>>;
+}
+
+const { post, alternates } = Astro.props;
+const lang = Astro.params.lang as Lang;
+const t = useTranslations(lang);
+const { Content } = await render(post);
+const { title, description, pubDate, updatedDate, tags } = post.data;
+---
+
+<BaseLayout lang={lang} title={title} description={description} alternates={alternates}>
+  <article class="post">
+    <a class="back" href={`/${lang}/`}>{t('post.back')}</a>
+    <h1>{title}</h1>
+    <p class="meta">
+      <span>{t('post.published')} <time datetime={pubDate.toISOString()}>{formatDate(pubDate, lang)}</time></span>
+      {
+        updatedDate && (
+          <span>
+            · {t('post.updated')} <time datetime={updatedDate.toISOString()}>{formatDate(updatedDate, lang)}</time>
+          </span>
+        )
+      }
+    </p>
+    {
+      tags.length > 0 && (
+        <ul class="tags">
+          {tags.map((tag) => (
+            <li>#{tag}</li>
+          ))}
+        </ul>
+      )
+    }
+    <div class="prose">
+      <Content />
+    </div>
+  </article>
+</BaseLayout>

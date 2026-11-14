@@ -1,0 +1,25 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import { isLang, langs, useTranslations, defaultLang } from '@/i18n/ui';
+
+// Static hosts serve one 404 page for every locale, so show all three languages.
+const first = Astro.url.pathname.split('/')[1];
+const lang = isLang(first) ? first : defaultLang;
+const alternates = Object.fromEntries(langs.map((l) => [l, `/${l}/`]));
+---
+
+<BaseLayout lang={lang} title="404" alternates={alternates}>
+  <section class="intro">
+    <h1>404</h1>
+    {
+      langs.map((l) => {
+        const t = useTranslations(l);
+        return (
+          <p lang={l}>
+            {t('404.title')} · <a href={`/${l}/`}>{t('404.home')}</a>
+          </p>
+        );
+      })
+    }
+  </section>
+</BaseLayout>
