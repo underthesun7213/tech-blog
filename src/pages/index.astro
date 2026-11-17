@@ -1,0 +1,27 @@
+---
+// Root URL: send visitors to their browser language, falling back to the default (ko).
+import { defaultLang, langs } from '@/i18n/ui';
+const fallback = `/${defaultLang}/`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tech Blog</title>
+    <meta name="robots" content="noindex" />
+    <noscript><meta http-equiv="refresh" content={`0; url=${fallback}`} /></noscript>
+    <script is:inline define:vars={{ langs, fallback }}>
+      const preferred = (navigator.languages || [navigator.language])
+        .map((l) => l.slice(0, 2).toLowerCase())
+        .find((l) => langs.includes(l));
+      location.replace(preferred ? `/${preferred}/` : fallback);
+    </script>
+  </head>
+  <body>
+    <p>
+      {langs.map((l) => <a href={`/${l}/`}>{l}</a>)}
+    </p>
+  </body>
+</html>

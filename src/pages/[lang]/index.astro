@@ -1,0 +1,43 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import { formatDate, langs, useTranslations, type Lang } from '@/i18n/ui';
+import { getPosts, parsePostId, postUrl } from '@/lib/posts';
+
+export function getStaticPaths() {
+  return langs.map((lang) => ({ params: { lang } }));
+}
+
+const lang = Astro.params.lang as Lang;
+const t = useTranslations(lang);
+const posts = await getPosts(lang);
+const alternates = Object.fromEntries(langs.map((l) => [l, `/${l}/`]));
+---
+
+<BaseLayout lang={lang} alternates={alternates}>
+  <section class="intro">
+    <h1>{t('site.title')}</h1>
+    <p>{t('site.description')}</p>
+  </section>
+
+  <h2 class="section-title">{t('posts.recent')}</h2>
+  {
+    posts.length === 0 ? (
+      <p class="muted">{t('posts.empty')}</p>
+    ) : (
+      <ul class="post-list">
+        {posts.map((post) => {
+          const { slug } = parsePostId(post.id);
+          return (
+            <li>
+              <a href={postUrl(lang, slug)}>
+                <span class="post-title">{post.data.title}</span>
+                {post.data.description && <span class="post-desc">{post.data.description}</span>}
+              </a>
+              <time datetime={post.data.pubDate.toISOString()}>{formatDate(post.data.pubDate, lang)}</time>
+            </li>
+          );
+        })}
+      </ul>
+    )
+  }
+</BaseLayout>

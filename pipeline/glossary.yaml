@@ -1,0 +1,13 @@
+# Fixed translations for terms the blog uses often.
+# Add a term once here and every translation follows it.
+# Format:  <Korean term>: { en: ..., ja: ... }
+# Leave a language out to let the translator choose.
+
+세컨드 브레인: { en: second brain, ja: セカンドブレイン }
+옵시디언: { en: Obsidian, ja: Obsidian }
+노트: { en: note, ja: ノート }
+볼트: { en: vault, ja: Vault }
+컴포넌트: { en: component, ja: コンポーネント }
+상태 관리: { en: state management, ja: 状態管理 }
+배포: { en: deployment, ja: デプロイ }
+에이전트: { en: agent, ja: エージェント }

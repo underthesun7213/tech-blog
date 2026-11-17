@@ -1,0 +1,74 @@
+---
+import '@/styles/global.css';
+import { htmlLang, languages, langs, useTranslations, type Lang } from '@/i18n/ui';
+
+interface Props {
+  lang: Lang;
+  title?: string;
+  description?: string;
+  /** Path of this page in each language it exists in, e.g. { ko: '/ko/posts/a/', en: '/en/posts/a/' } */
+  alternates: Partial<Record<Lang, string>>;
+}
+
+const { lang, title, description, alternates } = Astro.props;
+const t = useTranslations(lang);
+const siteTitle = t('site.title');
+const pageTitle = title ? `${title} | ${siteTitle}` : siteTitle;
+const pageDescription = description ?? t('site.description');
+const site = Astro.site ?? Astro.url;
+const canonical = new URL(Astro.url.pathname, site);
+---
+
+<!doctype html>
+<html lang={htmlLang[lang]}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={pageDescription} />
+    <link rel="canonical" href={canonical} />
+    {
+      Object.entries(alternates).map(([l, path]) => (
+        <link rel="alternate" hreflang={htmlLang[l as Lang]} href={new URL(path, site)} />
+      ))
+    }
+    {alternates.en && <link rel="alternate" hreflang="x-default" href={new URL(alternates.en, site)} />}
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={pageDescription} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content={htmlLang[lang].replace('-', '_')} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="site-title" href={`/${lang}/`}>{siteTitle}</a>
+      <nav aria-label={t('nav.language')} class="lang-switcher">
+        {
+          langs.map((l) => {
+            const href = alternates[l] ?? `/${l}/`;
+            const missing = !alternates[l];
+            return (
+              <a
+                href={href}
+                hreflang={htmlLang[l]}
+                lang={htmlLang[l]}
+                aria-current={l === lang ? 'true' : undefined}
+                class:list={{ missing }}
+                title={missing ? useTranslations(l)('post.notTranslated') : undefined}
+              >
+                {languages[l]}
+              </a>
+            );
+          })
+        }
+      </nav>
+    </header>
+    <main>
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <p>© {new Date().getFullYear()} · {siteTitle}</p>
+    </footer>
+  </body>
+</html>

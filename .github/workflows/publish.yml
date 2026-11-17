@@ -1,0 +1,90 @@
+name: Sync vault and translate
+
+# Pulls `publish: true` notes from the private vault, translates new or changed posts,
+# and opens a PR. Runs on a schedule and on demand only (never on pull_request), so
+# forks can't reach the secrets.
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Retranslate every post
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 21 * * *' # 06:00 KST
+  repository_dispatch:
+    types: [vault-updated]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out private vault
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/obsidian-vault
+          token: ${{ secrets.VAULT_TOKEN }}
+          path: .vault
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Sync published notes
+        run: npm run sync
+        env:
+          VAULT_PATH: .vault
+
+      - name: Remove vault checkout
+        run: rm -rf .vault
+
+      # Exits non-zero only on setup problems (e.g. missing key). A post that fails to translate
+      # is listed in the report and retried next run; the rest still get a PR.
+      - name: Translate
+        run: npm run translate -- --report "$RUNNER_TEMP/translate-report.md" ${{ inputs.force && '--force' || '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Build
+        run: npm run build
+
+      - name: Write PR body
+        run: |
+          {
+            echo 'Automated by the **Sync vault and translate** workflow.'
+            echo
+            echo '- Korean posts copied from notes marked `publish: true` (drafts are skipped)'
+            echo '- English and Japanese translations created or refreshed where the Korean post changed'
+            echo
+            if [ -f "$RUNNER_TEMP/translate-report.md" ]; then cat "$RUNNER_TEMP/translate-report.md"; fi
+            echo
+            echo 'Review the translations before merging. Edits you make here are kept as the reference the next time the Korean post changes.'
+          } > "$RUNNER_TEMP/pr-body.md"
+
+      - name: Open PR
+        # Third-party action in a job with write access: pinned to a commit, not a movable tag
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7.0.11
+        with:
+          branch: content/auto-publish
+          delete-branch: true
+          add-paths: |
+            src/content/posts/**
+            public/images/**
+          commit-message: 'content: sync vault and update translations'
+          title: 'content: sync vault and update translations'
+          body-path: ${{ runner.temp }}/pr-body.md
