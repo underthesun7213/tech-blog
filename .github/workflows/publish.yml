@@ -62,7 +62,8 @@ jobs:
         run: npm run build
 
       - name: Open PR
-        uses: peter-evans/create-pull-request@v7
+        # Third-party action in a job with write access: pinned to a commit, not a movable tag
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7.0.11
         with:
           branch: content/auto-publish
           delete-branch: true
