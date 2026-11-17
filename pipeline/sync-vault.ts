@@ -23,6 +23,7 @@ import {
 } from './lib.ts';
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif']);
+const PUBLISHABLE_EXT = new Set([...IMAGE_EXT, '.pdf']);
 const SKIP_DIRS = new Set(['node_modules', 'templates', 'Templates']);
 
 const vaultPath = process.env.VAULT_PATH;
@@ -39,7 +40,7 @@ type Published = Note & { slug: string };
 // ---------------------------------------------------------------- index the vault
 const files = walk(vault, SKIP_DIRS);
 const notes: Note[] = [];
-const attachments = new Map<string, string>(); // basename (lowercase) -> full path
+const attachments = new Map<string, string[]>(); // basename (lowercase) -> every file with that name
 
 for (const file of files) {
   if (file.endsWith('.md')) {
@@ -47,7 +48,8 @@ for (const file of files) {
     const rel = path.relative(vault, file).replaceAll('\\', '/').replace(/\.md$/, '');
     notes.push({ file, name: path.basename(rel), rel, data, body });
   } else {
-    attachments.set(path.basename(file).toLowerCase(), file);
+    const key = path.basename(file).toLowerCase();
+    attachments.set(key, [...(attachments.get(key) ?? []), file]);
   }
 }
 
@@ -100,14 +102,50 @@ function headingAnchor(heading: string) {
     .replace(/\s+/g, '-');
 }
 
-function copyAttachment(slug: string, name: string): string | undefined {
-  const src = attachments.get(path.basename(name).toLowerCase());
-  if (!src) return undefined;
+/** Per-note conversion state. Files are only copied after every note converts cleanly. */
+type Ctx = { slug: string; noteDir: string; errors: string[]; missing: string[]; copies: [string, string][] };
+
+function insideVault(file: string) {
+  const rel = path.relative(vault, file);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/**
+ * Find the vault file an embed points at, the way Obsidian does: an embed with a folder
+ * is an exact path; a bare file name must match exactly one file, or one next to the note.
+ * Never guess between several files: a wrong guess could publish a private file.
+ */
+function resolveAttachment(name: string, ctx: Ctx): string | undefined {
+  const clean = name.trim().replace(/^\.\//, '');
+  if (clean.includes('/')) {
+    for (const candidate of [path.join(ctx.noteDir, clean), path.join(vault, clean)]) {
+      if (insideVault(candidate) && existsSync(candidate)) return candidate;
+    }
+    return undefined;
+  }
+  const matches = attachments.get(clean.toLowerCase()) ?? [];
+  if (matches.length <= 1) return matches[0];
+  const sameFolder = matches.filter((m) => path.dirname(m) === ctx.noteDir);
+  if (sameFolder.length === 1) return sameFolder[0];
+  // Don't print the matching paths: CI logs are public and folder names can be private.
+  ctx.errors.push(`"${ctx.slug}": "${clean}" matches ${matches.length} files in the vault. Embed it with its folder path.`);
+  return undefined;
+}
+
+function copyAttachment(name: string, ctx: Ctx): string | undefined {
+  const ext = path.extname(name).toLowerCase();
+  if (!PUBLISHABLE_EXT.has(ext)) {
+    ctx.errors.push(`"${ctx.slug}": "${path.basename(name)}" can't be published (only images and PDFs).`);
+    return undefined;
+  }
+  const src = resolveAttachment(name, ctx);
+  if (!src) {
+    if (!ctx.errors.length) ctx.missing.push(name);
+    return undefined;
+  }
   const fileName = path.basename(src).replace(/\s+/g, '-');
-  const destDir = path.join(IMAGES_DIR, slug);
-  mkdirSync(destDir, { recursive: true });
-  copyFileSync(src, path.join(destDir, fileName));
-  return `/images/${slug}/${encodeURIComponent(fileName)}`;
+  ctx.copies.push([src, path.join(IMAGES_DIR, ctx.slug, fileName)]);
+  return `/images/${ctx.slug}/${encodeURIComponent(fileName)}`;
 }
 
 function resolveLink(target: string): { url?: string; label: string } {
@@ -120,23 +158,31 @@ function resolveLink(target: string): { url?: string; label: string } {
   return { url: `/${SOURCE_LANG}/posts/${slug}/${heading ? `#${headingAnchor(heading)}` : ''}`, label };
 }
 
-function convert(body: string, slug: string, missing: string[]): string {
+function convert(body: string, ctx: Ctx): string {
   // Obsidian comments %% ... %% can span lines; remove before anything else.
   body = mapProse(body, (s) => s.replace(/%%[\s\S]*?%%/g, ''));
+  // Fail closed: a %% left in prose means an unclosed comment, or one that wraps a code block
+  // and was split by the code-aware parser. Publishing it could leak the "hidden" text.
+  let leftover = false;
+  mapProse(body, (s) => ((leftover ||= s.includes('%%')), s));
+  if (leftover) {
+    ctx.errors.push(`"${ctx.slug}": has an unclosed %% comment, or a %% comment around a code block.`);
+    return body;
+  }
   return mapProse(body, (s) =>
     s
       // ![[image.png|300]] / ![[Note]] embeds
       .replace(/!\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g, (_, target: string, alias?: string) => {
         const ext = path.extname(target).toLowerCase();
         if (IMAGE_EXT.has(ext)) {
-          const url = copyAttachment(slug, target);
-          if (!url) return (missing.push(target), '');
+          const url = copyAttachment(target, ctx);
+          if (!url) return '';
           const alt = alias && !/^\d+(x\d+)?$/.test(alias) ? alias : path.basename(target, ext);
           return `![${alt}](${url})`;
         }
         if (ext && ext !== '.md') {
-          const url = copyAttachment(slug, target);
-          return url ? `[${path.basename(target)}](${url})` : (missing.push(target), '');
+          const url = copyAttachment(target, ctx);
+          return url ? `[${path.basename(target)}](${url})` : '';
         }
         const { url, label } = resolveLink(target);
         return url ? `[${alias || label}](${url})` : alias || label;
@@ -148,8 +194,8 @@ function convert(body: string, slug: string, missing: string[]): string {
       })
       // Standard markdown images pointing at vault attachments
       .replace(/!\[([^\]]*)\]\((?!https?:|\/)([^)\s]+)\)/g, (m, alt: string, src: string) => {
-        const url = copyAttachment(slug, decodeURIComponent(src));
-        return url ? `![${alt}](${url})` : (missing.push(src), m);
+        const url = copyAttachment(decodeURIComponent(src), ctx);
+        return url ? `![${alt}](${url})` : m;
       })
       // ==highlight==
       .replace(/==([^=\n]+)==/g, '<mark>$1</mark>')
@@ -165,17 +211,32 @@ function normalizeTags(value: unknown): string[] {
   return list.map((t) => String(t).replace(/^#/, '').trim()).filter((t) => t && t !== 'publish');
 }
 
-// ---------------------------------------------------------------- write posts
+// ---------------------------------------------------------------- convert all, then write
+// Convert every note first; if any fails a privacy check, write nothing.
+const converted = published.map((note) => {
+  const ctx: Ctx = { slug: note.slug, noteDir: path.dirname(note.file), errors: [], missing: [], copies: [] };
+  return { note, ctx, body: convert(note.body, ctx) };
+});
+const conversionErrors = converted.flatMap((c) => c.ctx.errors);
+if (conversionErrors.length) {
+  console.error(conversionErrors.map((e) => `✗ ${e}`).join('\n'));
+  console.error('\nNothing was written. Fix the notes above and run sync again.');
+  process.exit(1);
+}
+
 mkdirSync(outDir, { recursive: true });
 const today = new Date().toISOString().slice(0, 10);
 let written = 0;
 
-for (const note of published) {
+for (const { note, ctx, body } of converted) {
   const outFile = path.join(outDir, `${note.slug}.md`);
   const existing = existsSync(outFile) ? readMarkdown(outFile).data : {};
   rmSync(path.join(IMAGES_DIR, note.slug), { recursive: true, force: true });
-  const missing: string[] = [];
-  const body = convert(note.body, note.slug, missing);
+  for (const [src, dest] of ctx.copies) {
+    mkdirSync(path.dirname(dest), { recursive: true });
+    copyFileSync(src, dest);
+  }
+  const missing = ctx.missing;
 
   const data: Frontmatter = {
     title: typeof note.data.title === 'string' ? note.data.title : note.name,
