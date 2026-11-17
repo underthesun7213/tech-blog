@@ -65,8 +65,14 @@ function slugify(text: string) {
 
 const errors: string[] = [];
 const published: Published[] = [];
+let drafts = 0;
 for (const note of notes) {
   if (note.data.publish !== true) continue;
+  // Drafts stay in the vault: the blog repo is public, so even hidden posts would be readable on GitHub.
+  if (note.data.draft === true) {
+    drafts++;
+    continue;
+  }
   const slug = typeof note.data.slug === 'string' ? slugify(note.data.slug) : slugify(note.name);
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) {
     errors.push(`"${note.rel}": add an English \`slug:\` to its frontmatter (URLs must be a-z, 0-9, -).`);
@@ -244,7 +250,6 @@ for (const { note, ctx, body } of converted) {
     pubDate: toDateString(note.data.pubDate) ?? toDateString(note.data.date) ?? toDateString(existing.pubDate) ?? today,
     updatedDate: toDateString(note.data.updatedDate) ?? toDateString(note.data.updated),
     tags: normalizeTags(note.data.tags),
-    draft: note.data.draft === true ? true : undefined,
     syncedFromVault: true,
   };
   const next = stringifyMarkdown(data, body);
@@ -272,5 +277,5 @@ for (const file of walk(outDir)) {
 
 console.log(
   `\nSync done: ${published.length} published note(s), ${written} written, ${removed} removed, ` +
-    `${notes.length - published.length} private note(s) skipped.`,
+    `${drafts} draft(s) and ${notes.length - published.length - drafts} private note(s) skipped.`,
 );

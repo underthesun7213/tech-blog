@@ -53,13 +53,28 @@ jobs:
       - name: Remove vault checkout
         run: rm -rf .vault
 
+      # Exits non-zero only on setup problems (e.g. missing key). A post that fails to translate
+      # is listed in the report and retried next run; the rest still get a PR.
       - name: Translate
-        run: npm run translate -- ${{ inputs.force && '--force' || '' }}
+        run: npm run translate -- --report "$RUNNER_TEMP/translate-report.md" ${{ inputs.force && '--force' || '' }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Build
         run: npm run build
+
+      - name: Write PR body
+        run: |
+          {
+            echo 'Automated by the **Sync vault and translate** workflow.'
+            echo
+            echo '- Korean posts copied from notes marked `publish: true` (drafts are skipped)'
+            echo '- English and Japanese translations created or refreshed where the Korean post changed'
+            echo
+            if [ -f "$RUNNER_TEMP/translate-report.md" ]; then cat "$RUNNER_TEMP/translate-report.md"; fi
+            echo
+            echo 'Review the translations before merging. Edits you make here are kept as the reference the next time the Korean post changes.'
+          } > "$RUNNER_TEMP/pr-body.md"
 
       - name: Open PR
         # Third-party action in a job with write access: pinned to a commit, not a movable tag
@@ -72,10 +87,4 @@ jobs:
             public/images/**
           commit-message: 'content: sync vault and update translations'
           title: 'content: sync vault and update translations'
-          body: |
-            Automated by the **Sync vault and translate** workflow.
-
-            - Korean posts copied from notes marked `publish: true`
-            - English and Japanese translations created or refreshed where the Korean post changed
-
-            Review the translations before merging.
+          body-path: ${{ runner.temp }}/pr-body.md

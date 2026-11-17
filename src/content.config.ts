@@ -19,6 +19,8 @@ const posts = defineCollection({
     syncedFromVault: z.boolean().optional(),
     // Set by pipeline/translate.ts: hash of the source (ko) post this translation was made from
     sourceHash: z.string().optional(),
+    // Set by pipeline/translate.ts: hash of what it wrote, to detect later edits by hand
+    translationHash: z.string().optional(),
   }),
 });
 
