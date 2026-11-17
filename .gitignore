@@ -5,3 +5,6 @@ dist/
 .env.*
 !.env.example
 .DS_Store
+
+# Private vault checkout used by CI; never commit it
+.vault/

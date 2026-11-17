@@ -15,7 +15,9 @@ const posts = defineCollection({
     updatedDate: z.coerce.date().optional(),
     tags: z.array(z.string()).default([]),
     draft: z.boolean().default(false),
-    // Set by the translation pipeline: hash of the source (ko) file this translation was made from
+    // Set by pipeline/sync-vault.ts on posts copied from the Obsidian vault
+    syncedFromVault: z.boolean().optional(),
+    // Set by pipeline/translate.ts: hash of the source (ko) post this translation was made from
     sourceHash: z.string().optional(),
   }),
 });

@@ -1,0 +1,80 @@
+name: Sync vault and translate
+
+# Pulls `publish: true` notes from the private vault, translates new or changed posts,
+# and opens a PR. Runs on a schedule and on demand only (never on pull_request), so
+# forks can't reach the secrets.
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Retranslate every post
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 21 * * *' # 06:00 KST
+  repository_dispatch:
+    types: [vault-updated]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out private vault
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/obsidian-vault
+          token: ${{ secrets.VAULT_TOKEN }}
+          path: .vault
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Sync published notes
+        run: npm run sync
+        env:
+          VAULT_PATH: .vault
+
+      - name: Remove vault checkout
+        run: rm -rf .vault
+
+      - name: Translate
+        run: npm run translate -- ${{ inputs.force && '--force' || '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Build
+        run: npm run build
+
+      - name: Open PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: content/auto-publish
+          delete-branch: true
+          add-paths: |
+            src/content/posts/**
+            public/images/**
+          commit-message: 'content: sync vault and update translations'
+          title: 'content: sync vault and update translations'
+          body: |
+            Automated by the **Sync vault and translate** workflow.
+
+            - Korean posts copied from notes marked `publish: true`
+            - English and Japanese translations created or refreshed where the Korean post changed
+
+            Review the translations before merging.
